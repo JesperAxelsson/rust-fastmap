@@ -8,12 +8,18 @@ Be aware that no effort is made against DoS attacks.
 Performace compared to the standard hashmap:
 
 ````
-test tests::u64_get_built_in    ... bench:      23,047 ns/iter (+/- 1,862)
-test tests::u64_get_fastmap     ... bench:       9,599 ns/iter (+/- 379)
-test tests::u64_get_ordermap    ... bench:      22,449 ns/iter (+/- 2,228)
-test tests::u64_insert_built_in ... bench:      28,119 ns/iter (+/- 1,818)
-test tests::u64_insert_fastmap  ... bench:      20,824 ns/iter (+/- 1,016)
-test tests::u64_insert_ordermap ... bench:      26,269 ns/iter (+/- 3,025)
+test tests::string_get_built_in    ... bench:  11,616,188 ns/iter (+/- 1,819,299)
+test tests::string_get_fastmap     ... bench:  12,451,457 ns/iter (+/- 1,569,140)
+test tests::string_get_ordermap    ... bench:   8,925,038 ns/iter (+/- 542,242)
+test tests::string_insert_built_in ... bench:  12,997,246 ns/iter (+/- 795,416)
+test tests::string_insert_fastmap  ... bench:  14,976,130 ns/iter (+/- 920,800)
+test tests::string_insert_ordermap ... bench:   9,371,283 ns/iter (+/- 724,981)
+test tests::u64_get_built_in       ... bench:      21,706 ns/iter (+/- 1,210)
+test tests::u64_get_fastmap        ... bench:       9,905 ns/iter (+/- 496)
+test tests::u64_get_ordermap       ... bench:      23,074 ns/iter (+/- 1,199)
+test tests::u64_insert_built_in    ... bench:      30,466 ns/iter (+/- 2,532)
+test tests::u64_insert_fastmap     ... bench:      20,977 ns/iter (+/- 991)
+test tests::u64_insert_ordermap    ... bench:      25,572 ns/iter (+/- 1,607)
 ````
 
 # How to use
