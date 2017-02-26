@@ -1,0 +1,15 @@
+[package]
+name = "fastmap"
+version = "0.1.0"
+description = "Specialized HashMap for speed"
+authors = ["Jesper Axelsson <jesperaxe@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/JesperAxelsson/rust-fastmap"
+keywords = ["hashmap", "collection"]
+
+[dependencies]
+
+[dev-dependencies]
+rand = "0.3"
+ordermap = "0.2.7"
