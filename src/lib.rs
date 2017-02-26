@@ -11,11 +11,12 @@ use std::hash::Hasher;
 //     value: V
 // }
 
-pub struct FastMap<K, V>{
+pub struct FastMap<K, V, S = Murmur2_64a>{
     cache:  Vec<Vec<(K, V)>>,
     size: u32,
     mod_mask: u64,
     count: usize,
+    hasher: S,
 }
 
 
@@ -45,8 +46,15 @@ impl<K, V> FastMap<K, V>
     /// let mut map: FastMap<u64, u64> = FastMap::with_capacity(20);
     /// ```
     pub fn with_capacity(capacity: usize) -> Self {
+        let m = Murmur2_64a::new();
 
-        let mut map = FastMap { cache: Vec::new(), size: 0, count: 0, mod_mask: 0 };
+        let mut map = FastMap {
+            cache: Vec::new(),
+            size: 0,
+            count: 0,
+            mod_mask: 0,
+            hasher: m,
+        };
 
         map.increase_cache();
 
@@ -292,15 +300,12 @@ impl<K, V> FastMap<K, V>
     //     val
     // }
 
-    fn hashash(key: &K) -> u64 {
-        let mut murmur = Murmur2_64a::new();
-        key.hash(&mut murmur);
-        murmur.finish()
-    }
-
     #[inline]
     fn calc_index(&self, key: &K) -> usize {
-        let hash = Self::hashash(key);
+        let mut hasher = self.hasher.build_hasher();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+
         // Faster modulus
         (hash & self.mod_mask) as usize
     }
