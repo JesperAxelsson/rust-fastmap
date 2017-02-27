@@ -75,7 +75,7 @@ impl<K, V> FastMap<K, V>
     /// map.insert(21, "Eat my shorts");
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> bool {
-        flame::start_guard("insert");
+        let _guard = flame::start_guard("insert");
         let ix = self.calc_index(&key);
 
         {
@@ -111,11 +111,13 @@ impl<K, V> FastMap<K, V>
     /// assert!(map.contains_key(21));
     /// ```
     pub fn get(&self, key: K) -> Option<&V> {
+        let _guard = flame::start_guard("get");
         let ix = self.calc_index(&key);
 
         let ref vals = self.cache[ix];
 
         if vals.len() > 0 {
+            let _guard2 = flame::start_guard("get_search");
 
             for kv in vals.iter() {
                 if kv.0 == key {
@@ -301,7 +303,7 @@ impl<K, V> FastMap<K, V>
 
     #[inline]
     fn calc_index(&self, key: &K) -> usize {
-        flame::start_guard("calc_index");
+        let _guard =flame::start_guard("calc_index");
         let mut hasher = self.hasher.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -318,7 +320,7 @@ impl<K, V> FastMap<K, V>
 
 
     fn increase_cache(&mut self) {
-        flame::start_guard("increase_cache");
+        let _guard = flame::start_guard("increase_cache");
         self.size += 1;
         let new_lim = self.lim();
         self.mod_mask = (new_lim as u64) - 1;
@@ -348,6 +350,7 @@ impl<K, V> FastMap<K, V>
 
 
     fn ensure_load_rate(&mut self) {
+        let _guard2 = flame::start_guard("ensure_load_rate");
         while ((self.count*100) / self.cache.len()) > 70 {
             self.increase_cache();
         }
