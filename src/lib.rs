@@ -422,7 +422,7 @@ impl<K, V> FastMap<K, V>
         map
     }
 
-    pub fn write_flame() {
+    pub fn write_flame(&self) {
         use std::fs::File;
         flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
     }
