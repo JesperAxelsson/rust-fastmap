@@ -1,6 +1,4 @@
-extern crate core;
-
-use core::iter::Iterator;
+extern crate flame;
 
 use std::hash::Hash;
 use std::hash::BuildHasher;
@@ -77,6 +75,7 @@ impl<K, V> FastMap<K, V>
     /// map.insert(21, "Eat my shorts");
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> bool {
+        flame::start_guard("insert");
         let ix = self.calc_index(&key);
 
         {
@@ -302,6 +301,7 @@ impl<K, V> FastMap<K, V>
 
     #[inline]
     fn calc_index(&self, key: &K) -> usize {
+        flame::start_guard("calc_index");
         let mut hasher = self.hasher.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -318,6 +318,7 @@ impl<K, V> FastMap<K, V>
 
 
     fn increase_cache(&mut self) {
+        flame::start_guard("increase_cache");
         self.size += 1;
         let new_lim = self.lim();
         self.mod_mask = (new_lim as u64) - 1;
@@ -421,6 +422,10 @@ impl<K, V> FastMap<K, V>
         map
     }
 
+    pub fn write_flame() {
+        use std::fs::File;
+        flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
+    }
 }
 
 
