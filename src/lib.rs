@@ -60,6 +60,7 @@ impl<K, V> FastMap<K, V>
             map.increase_cache();
         }
 
+        flame::clear();
         map
     }
 
