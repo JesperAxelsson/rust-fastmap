@@ -411,7 +411,7 @@ impl<K, V> FastMap<K, V>
 
         for s in self.cache.iter() {
             let key = s.len() as u64;
-            if key > 1 {
+            if key > 0 {
                 if !map.contains_key(key) {
                     map.insert(key, 1);
                 } else {
