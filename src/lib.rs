@@ -93,12 +93,12 @@ impl<K, V> FastMap<K, V>
     fn insert_internal(&mut self, key: K, value: V) -> bool {
         // let _guard = flame::start_guard("insert");
         let (hash, mut ix) = self.calc_index(&key);
-        let ix_start = ix;
+        // let ix_start = ix;
 
         {
             loop {
                 match self.cache[ix] {
-                    Bucket::Value(h, ref k, ref v) => {
+                    Bucket::Value(h, ref k, _) => {
                         if h == hash && *k == key {
                             return false;
                         } else {
@@ -174,7 +174,7 @@ impl<K, V> FastMap<K, V>
 
         loop {
             match self.cache[ix] {
-                Bucket::Value(h, ref k, ref v) => {
+                Bucket::Value(h, ref k, _) => {
                     if h == hash && *k == key {
                         break;
                     } else {
@@ -186,7 +186,7 @@ impl<K, V> FastMap<K, V>
             }
         }
 
-        if let Bucket::Value(h, ref k, ref mut v) = self.cache[ix] {
+        if let Bucket::Value(_, _, ref mut v) = self.cache[ix] {
             return Some(&mut *v);
         } else {
             panic!("get_mut item we want to give away were not there anymore!");
@@ -213,7 +213,7 @@ impl<K, V> FastMap<K, V>
 
         loop {
             match self.cache[ix] {
-                Bucket::Value(h, ref k, ref v) => {
+                Bucket::Value(h, ref k, _) => {
                     if h == hash && *k == key {
                         break;
                     } else {
@@ -221,7 +221,7 @@ impl<K, V> FastMap<K, V>
                     }
                 }
                 Bucket::Deleted => ix += 1,
-                Bucket::Empty => return None, // Got free spot!
+                Bucket::Empty => return None,
             }
         }
 
@@ -237,8 +237,6 @@ impl<K, V> FastMap<K, V>
             Bucket::Value(_, _, v) => return Some(v),
             _ => panic!("Item that we wanted to remove is gone!"),
         }
-
-        return None;
     }
 
     /// Returns true if key is in map.
@@ -300,21 +298,26 @@ impl<K, V> FastMap<K, V>
 
     //**** Iterators *****
 
-    // pub fn iter<'a>(&self) -> Iter<K, V> {
-    //     Iter::new(&self.cache)
-    // }
+    pub fn iter<'a>(&self) -> Iter<K, V> {
+        Iter {
+            outer: self.cache.iter()
+        }
+    }
 
-    // pub fn keys(&mut self) -> Keys<K, V> {
-    //     Keys { inner: self.iter() }
-    // }
+    pub fn keys(&mut self) -> Keys<K, V> {
+        Keys { inner: self.iter() }
+    }
 
-    // pub fn values(&mut self) -> Values<K, V> {
-    //     Values { inner: self.iter() }
-    // }
+    pub fn values(&mut self) -> Values<K, V> {
+        Values { inner: self.iter() }
+    }
 
-    // pub fn iter_mut<'a>(&mut self) -> IterMut<K, V> {
-    //     IterMut::new(&mut self.cache)
-    // }
+    pub fn iter_mut<'a>(&mut self) -> IterMut<K, V> {
+        // IterMut::new(&mut self.cache)
+        IterMut {
+            outer: self.cache.iter_mut()
+        }
+    }
 
 
     //**** Internal hash stuff *****
@@ -374,7 +377,7 @@ impl<K, V> FastMap<K, V>
         while let Some(item) = vec.pop() {
 
             match item {
-                Bucket::Value(h, k, v) => {
+                Bucket::Value(_, k, v) => {
                     self.insert_internal(k, v);
                     // let ix = self.ix(h);
                     // self.cache[ix] = Bucket::Value(h, k, v);
@@ -383,21 +386,7 @@ impl<K, V> FastMap<K, V>
             }
         }
 
-        // while vec.len() > 0 {
-        //     let mut values = vec.pop().unwrap();
-        //     while values.len() > 0 {
-        //         if let Some(kv) = values.pop() {
-        //             if let Bucket::Value(h, k, v) = kv {
-        //                 let ix = self.ix(h);
-
-        //                 let ref mut vals = self.cache[ix];
-        //                 vals.push(Bucket::Value(h, k, v));
-        //             }
-        //         }
-        //     }
-        // }
-
-        // debug_assert!(self.cache.len() == self.lim(), "cache vector the wrong length, lim: {:?} cache: {:?}", self.lim(), self.cache.len());
+         // debug_assert!(self.cache.len() == self.lim(), "cache vector the wrong length, lim: {:?} cache: {:?}", self.lim(), self.cache.len());
         debug_assert_eq!(old_count, self.count, "Different count after increase cache! Old: {}, New: {}", old_count, self.count);
     }
 
@@ -421,11 +410,11 @@ impl<K, V> FastMap<K, V>
     pub fn load(&self) -> u64 {
         let mut count = 0;
 
-        // for i in 0..self.cache.len() {
-        //     if self.cache[i].len() > 0 {
-        //         count += 1;
-        //     }
-        // }
+        for item in self.cache.iter() {
+            if let Bucket::Value(_, _, _) = *item {
+                count += 1;
+            }
+        }
 
         count
     }
@@ -459,7 +448,7 @@ impl<K, V> FastMap<K, V>
 
 
     pub fn collisions(&self) -> FastMap<u64, u64> {
-        let mut map = FastMap::new();
+        let map = FastMap::new();
 
         // for s in self.cache.iter() {
         //     let key = s.len() as u64;
@@ -481,148 +470,97 @@ impl<K, V> FastMap<K, V>
 
 
 
-    // #[derive(Debug)]
-    // pub struct IterMut2<'a, V: 'a> {
-    //     iter: std::iter::Map<'a, Vec<(u64, V)>>,
-    //     // inner: SliceIterMut<'a, (u64, V)>,
-    // }
 
 
-// use std::slice::Iter as SliceIter;
-// use std::slice::IterMut as SliceIterMut;
+use std::slice::Iter as SliceIter;
+use std::slice::IterMut as SliceIterMut;
 
 // // ***************** Iter *********************
 
-// pub struct Iter<'a, K: 'a, V: 'a>
-//     where K: Eq + Hash {
-//     outer: SliceIter<'a, Vec<Bucket<K, V>>>,
-//     inner: SliceIter<'a, Bucket<K, V>>,
-// }
+pub struct Iter<'a, K: 'a, V: 'a>
+    where K: Eq + Hash {
+    outer: SliceIter<'a, Bucket<K, V>>,
+}
 
-// impl<'a, K, V> Iter<'a, K, V>
-//     where K: Eq + Hash{
-//     fn new(vec: &'a Vec<Vec<Bucket<K, V>>>) -> Self {
-//         let mut outer = vec.iter();
-//         let inner = outer.next()
-//                          .map(|v| v.iter())
-//                          .unwrap_or_else(|| (&[]).iter());
+impl<'a, K, V> Iterator for Iter<'a, K, V>
+    where K: Eq + Hash{
+    type Item = (&'a K, &'a V);
 
-//         Iter {
-//             outer: outer,
-//             inner: inner,
-//          }
-//     }
-// }
-
-// impl<'a, K, V> Iterator for Iter<'a, K, V>
-//     where K: Eq + Hash{
-//     type Item = (&'a K, &'a V);
-
-//     #[inline]
-//     fn next(&mut self) -> Option<(&'a K, &'a V)> {
-//         loop {
-//             match self.inner.next() {
-//                 Some(r) => {
-//                     match *r {
-//                         Bucket::Value(_, ref k, ref v) => return Some((&k, &v)),
-//                         Bucket::Empty => (),
-//                         Bucket::Deleted => {}
-//                     }
-
-//                 },
-//                 None => (),
-//             }
-
-//             match self.outer.next() {
-//                 Some(v) => self.inner = v.iter(),
-//                 None => return None,
-//             }
-//         }
-//     }
-// }
+    #[inline]
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        loop {
+            match self.outer.next() {
+                Some(r) => {
+                    match *r {
+                        Bucket::Value(_, ref k, ref v) => return Some((&k, &v)),
+                        _ => (),
+                    }
+                },
+                None => return None,
+            }
+        }
+    }
+}
 
 
 // ***************** Iter Mut *********************
 
-// pub struct IterMut<'a, K: 'a, V: 'a>
-//     where K: Eq + Hash {
-//     outer: SliceIterMut<'a, Vec<Bucket<K, V>>>,
-//     inner: SliceIterMut<'a, Bucket<K, V>>,
-// }
+pub struct IterMut<'a, K: 'a, V: 'a>
+    where K: Eq + Hash {
+    outer: SliceIterMut<'a, Bucket<K, V>>,
+}
 
-// impl<'a, K, V> IterMut<'a, K, V>
-//     where K: Eq + Hash{
-//     fn new(vec: &'a mut Vec<Vec<Bucket<K, V>>>) -> IterMut<'a, K, V> {
-//         let mut outer = vec.iter_mut();
-//         let inner = outer.next()
-//                          .map(|v| v.iter_mut())
-//                          .unwrap_or_else(|| (&mut []).iter_mut() );
+impl<'a, K, V> Iterator for IterMut<'a, K, V>
+    where K: Eq + Hash{
+    type Item = (&'a K, &'a mut V);
 
-//         IterMut {
-//             outer: outer,
-//             inner: inner,
-//         }
-//     }
-// }
-
-
-// impl<'a, K, V> Iterator for IterMut<'a, K, V>
-//     where K: Eq + Hash{
-//     type Item = (&'a K, &'a mut V);
-
-//     #[inline]
-//     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
-//         loop {
-//             match self.inner.next() {
-//                 Some(r) => {
-//                     match *r {
-//                         Bucket::Value(_, ref k, ref mut v) => return Some((&k, &mut *v)),
-//                         Bucket::Empty => (),
-//                         Bucket::Deleted => {}
-//                     }
-//                 }
-//                 None => (),
-//             }
-
-//             match self.outer.next() {
-//                 Some(v) => self.inner = v.iter_mut(),
-//                 None => return None,
-//             }
-//         }
-//     }
-// }
+    #[inline]
+    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
+         loop {
+            match self.outer.next() {
+                Some(r) => {
+                    match *r {
+                        Bucket::Value(_, ref k, ref mut v) => return Some((&k, &mut *v)),
+                        _ => (),
+                    }
+                },
+                None => return None,
+            }
+        }
+    }
+}
 
 
 // ***************** Values Iter *********************
 
-// pub struct Values<'a, K:'a, V: 'a>
-//     where K: Eq + Hash{
-//     inner: Iter<'a, K, V>
-// }
+pub struct Values<'a, K:'a, V: 'a>
+    where K: Eq + Hash{
+    inner: Iter<'a, K, V>
+}
 
 
-// impl<'a, K, V> Iterator for Values<'a, K, V>
-//      where K: Eq + Hash{
-//     type Item = &'a V;
+impl<'a, K, V> Iterator for Values<'a, K, V>
+     where K: Eq + Hash{
+    type Item = &'a V;
 
-//     #[inline] fn next(&mut self) -> Option<(&'a V)> { self.inner.next().map(|kv| kv.1) }
-//     #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
-// }
+    #[inline] fn next(&mut self) -> Option<(&'a V)> { self.inner.next().map(|kv| kv.1) }
+    #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+}
 
 // ***************** Keys Iter *********************
 
-// pub struct Keys<'a, K: 'a, V: 'a>
-//     where K: Eq + Hash {
-//     inner: Iter<'a, K, V>
-// }
+pub struct Keys<'a, K: 'a, V: 'a>
+    where K: Eq + Hash {
+    inner: Iter<'a, K, V>
+}
 
-// impl<'a, K, V> Iterator for Keys<'a, K, V>
-//     where K: Eq + Hash{
-//     type Item = &'a K;
+impl<'a, K, V> Iterator for Keys<'a, K, V>
+    where K: Eq + Hash{
+    type Item = &'a K;
 
-//     #[inline] fn next(&mut self) -> Option<&'a K> { self.inner.next().map(|kv| kv.0) }
-//     #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
-// }
+    #[inline] fn next(&mut self) -> Option<&'a K> { self.inner.next().map(|kv| kv.0) }
+    #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+}
 
 // // ***************** Values Mut *********************
 
