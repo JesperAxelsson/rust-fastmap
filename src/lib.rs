@@ -132,7 +132,6 @@ impl<K, V> FastMap<K, V>
     /// assert!(map.contains_key(21));
     /// ```
     pub fn get(&self, key: K) -> Option<&V> {
-        // let _guard = flame::start_guard("get");
         let (hash, mut ix) = self.calc_index(&key);
 
         loop {
@@ -171,30 +170,27 @@ impl<K, V> FastMap<K, V>
     ///     assert_eq!(*map.get(21).unwrap(), 43);
     /// ```
     pub fn get_mut(&mut self, key: K) -> Option<&mut V> {
-        let (hash, ix) = self.calc_index(&key);
+        let (hash, mut ix) = self.calc_index(&key);
 
-        let ref mut vals = self.cache[ix];
+        loop {
+            match self.cache[ix] {
+                Bucket::Value(h, ref k, ref v) => {
+                    if h == hash && *k == key {
+                        break;
+                    } else {
+                        ix += 1;
+                    }
+                }
+                Bucket::Deleted => ix += 1,
+                Bucket::Empty => return None,
+            }
+        }
 
-        // if vals.len() > 0 {
-        //     for kv in vals {
-        //         match *kv {
-        //             Bucket::Value(h, ref k, ref mut v) => {
-        //                 if h == hash && *k == key {
-        //                     return Some(&mut *v);
-        //                 }
-        //             }
-        //             Bucket::Empty => {}
-        //             Bucket::Deleted => {}
-        //         }
-        //     }
-
-        //     return None;
-
-        // } else {
-        //     return None;
-        // }
-
-           return None;
+        if let Bucket::Value(h, ref k, ref mut v) = self.cache[ix] {
+            return Some(&mut *v);
+        } else {
+            panic!("get_mut item we want to give away were not there anymore!");
+        }
     }
 
     /// Remove value from the FastMap.
@@ -242,45 +238,7 @@ impl<K, V> FastMap<K, V>
             _ => panic!("Item that we wanted to remove is gone!"),
         }
 
-
-        // if vals.len() > 0 {
-
-        //     for i in 0..vals.len() {
-        //         let key_match;
-        //         {
-        //             let ref peek = vals[i];
-
-        //             match *peek {
-        //                 Bucket::Value(h, ref k, _) => {
-        //                     if h == hash && *k == key {
-        //                         key_match = true;
-        //                     } else {
-        //                         key_match = false;
-        //                     }
-        //                 }
-        //                 _ => key_match = false
-        //             }
-        //         }
-
-        //         if key_match {
-        //             self.count -= 1;
-        //             let kv = vals.swap_remove(i);
-        //             match kv {
-        //                 Bucket::Value(_, _, v) => return Some(v),
-        //                 Bucket::Empty => panic!("Bucket empty when it should not be!"),
-        //                 Bucket::Deleted => panic!("Bucket empty when it should not be!")
-        //             }
-        //         }
-        //     }
-
-        //     return None;
-
-        // } else {
-        //     return None;
-        // }
-
         return None;
-
     }
 
     /// Returns true if key is in map.
@@ -370,7 +328,6 @@ impl<K, V> FastMap<K, V>
 
     #[inline]
     fn calc_index(&self, key: &K) -> (u64, usize) {
-        // let _guard =flame::start_guard("calc_index");
         let mut hasher = self.hasher.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
