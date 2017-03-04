@@ -56,8 +56,11 @@ mod tests {
         assert_eq!(map.len(), count);
 
         for s in data.iter() {
-            let val = map.remove(*s).unwrap();
-            assert_eq!(val, *s, "fastmap remove failed! key: {:?}", s);
+            if let Some(val) = map.remove(*s) {
+                assert_eq!(val, *s, "fastmap remove failed! key: {:?}", s);
+            } else {
+                assert!(false, "Failed to remove value: {:?}", *s);
+            }
         }
 
         assert_eq!(map.len(), 0);
@@ -69,7 +72,15 @@ mod tests {
         let mut map = FastMap::new();
 
         for i in 0..20_000 {
-            map.insert(i, format!("item: {:?}", i));
+            assert!(map.insert(i, format!("item: {:?}", i)), format!("Failed to insert key in map: {}", i));
+        }
+
+        for i in 0..20_000 {
+            if let Some(s) = map.get(i) {
+                assert_eq!(*s, format!("item: {:?}", i));
+            } else {
+                assert!(false, format!("Failed to retrive key in map: {}", i));
+            }
         }
     }
 
