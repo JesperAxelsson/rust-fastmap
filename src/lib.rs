@@ -7,9 +7,8 @@ use std::hash::Hasher;
 //     value: V
 // }
 
-pub struct FastMap<K, V, S = Murmur2_64a>
-    where K: Eq + Hash{
-    cache:  Vec<Vec<Bucket<K, V>>>,
+pub struct FastMap<K: Eq + Hash, V, S = Murmur2_64a> {
+    cache:  Vec<Bucket<K, V>>,
     // indices:  Vec<(K, V)>,
     size: u32,
     mod_mask: u64,
@@ -81,28 +80,38 @@ impl<K, V> FastMap<K, V>
     /// map.insert(21, "Eat my shorts");
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> bool {
+
+        self.insert_internal(key, value);
+
+        if (self.count & 4) == 4 {
+            self.ensure_load_rate();
+        }
+
+        true
+    }
+
+    fn insert_internal(&mut self, key: K, value: V) -> bool {
         // let _guard = flame::start_guard("insert");
-        let (hash, ix) = self.calc_index(&key);
+        let (hash, mut ix) = self.calc_index(&key);
+        let ix_start = ix;
 
         {
-            let ref mut vals = self.cache[ix];
-            for kv in vals.iter() {
-                match *kv {
-                    Bucket::Value(h, ref k, _) => {
+            loop {
+                match self.cache[ix] {
+                    Bucket::Value(h, ref k, ref v) => {
                         if h == hash && *k == key {
                             return false;
+                        } else {
+                            ix += 1;
                         }
                     }
-                    Bucket::Empty => {}
-                    Bucket::Deleted => {}
+                    Bucket::Deleted => ix += 1,
+                    Bucket::Empty => break, // Got free spot!
                 }
             }
 
             self.count += 1;
-            vals.push(Bucket::Value(hash, key, value));
-        }
-        if (self.count & 4) == 4 {
-            self.ensure_load_rate();
+            self.cache[ix] = Bucket::Value(hash, key, value);
         }
 
         true
@@ -124,30 +133,22 @@ impl<K, V> FastMap<K, V>
     /// ```
     pub fn get(&self, key: K) -> Option<&V> {
         // let _guard = flame::start_guard("get");
-        let (hash, ix) = self.calc_index(&key);
+        let (hash, mut ix) = self.calc_index(&key);
 
-        let ref vals = self.cache[ix];
-
-        if vals.len() > 0 {
-            // let _guard2 = flame::start_guard("get_search");
-
-            for kv in vals.iter() {
-                match *kv {
-                    Bucket::Value(h, ref k, ref v) => {
-                        if h == hash && *k == key {
-                            return Some(&v);
-                        }
+        loop {
+            match self.cache[ix] {
+                Bucket::Value(h, ref k, ref v) => {
+                    if h == hash && *k == key {
+                        return Some(&v);
+                    } else {
+                        ix += 1;
                     }
-                    Bucket::Empty => {}
-                    Bucket::Deleted => {}
                 }
+                Bucket::Deleted => ix += 1,
+                Bucket::Empty => return None,
             }
-
-            return None;
-
-        } else {
-            return None;
         }
+
     }
 
     /// Get mutable value from the FastMap.
@@ -174,24 +175,26 @@ impl<K, V> FastMap<K, V>
 
         let ref mut vals = self.cache[ix];
 
-        if vals.len() > 0 {
-            for kv in vals {
-                match *kv {
-                    Bucket::Value(h, ref k, ref mut v) => {
-                        if h == hash && *k == key {
-                            return Some(&mut *v);
-                        }
-                    }
-                    Bucket::Empty => {}
-                    Bucket::Deleted => {}
-                }
-            }
+        // if vals.len() > 0 {
+        //     for kv in vals {
+        //         match *kv {
+        //             Bucket::Value(h, ref k, ref mut v) => {
+        //                 if h == hash && *k == key {
+        //                     return Some(&mut *v);
+        //                 }
+        //             }
+        //             Bucket::Empty => {}
+        //             Bucket::Deleted => {}
+        //         }
+        //     }
 
-            return None;
+        //     return None;
 
-        } else {
-            return None;
-        }
+        // } else {
+        //     return None;
+        // }
+
+           return None;
     }
 
     /// Remove value from the FastMap.
@@ -209,45 +212,75 @@ impl<K, V> FastMap<K, V>
     /// assert!(!map.contains_key(21));
     /// ```
     pub fn remove(&mut self, key: K) -> Option<V> {
-        let (hash, ix) = self.calc_index(&key);
+        let (hash, mut ix) = self.calc_index(&key);
 
-        let ref mut vals = self.cache[ix];
 
-        if vals.len() > 0 {
-
-            for i in 0..vals.len() {
-                let key_match;
-                {
-                    let ref peek = vals[i];
-
-                    match *peek {
-                        Bucket::Value(h, ref k, _) => {
-                            if h == hash && *k == key {
-                                key_match = true;
-                            } else {
-                                key_match = false;
-                            }
-                        }
-                        _ => key_match = false
+        loop {
+            match self.cache[ix] {
+                Bucket::Value(h, ref k, ref v) => {
+                    if h == hash && *k == key {
+                        break;
+                    } else {
+                        ix += 1;
                     }
                 }
-
-                if key_match {
-                    self.count -= 1;
-                    let kv = vals.swap_remove(i);
-                    match kv {
-                        Bucket::Value(_, _, v) => return Some(v),
-                        Bucket::Empty => panic!("Bucket empty when it should not be!"),
-                        Bucket::Deleted => panic!("Bucket empty when it should not be!")
-                    }
-                }
+                Bucket::Deleted => ix += 1,
+                Bucket::Empty => return None, // Got free spot!
             }
-
-            return None;
-
-        } else {
-            return None;
         }
+
+        self.count -= 1;
+
+        // Push elemtent to switch with
+        self.cache.push(Bucket::Deleted);
+
+        let val = self.cache.swap_remove(ix);
+        self.cache[ix] = Bucket::Deleted;
+
+        match val {
+            Bucket::Value(_, _, v) => return Some(v),
+            _ => panic!("Item that we wanted to remove is gone!"),
+        }
+
+
+        // if vals.len() > 0 {
+
+        //     for i in 0..vals.len() {
+        //         let key_match;
+        //         {
+        //             let ref peek = vals[i];
+
+        //             match *peek {
+        //                 Bucket::Value(h, ref k, _) => {
+        //                     if h == hash && *k == key {
+        //                         key_match = true;
+        //                     } else {
+        //                         key_match = false;
+        //                     }
+        //                 }
+        //                 _ => key_match = false
+        //             }
+        //         }
+
+        //         if key_match {
+        //             self.count -= 1;
+        //             let kv = vals.swap_remove(i);
+        //             match kv {
+        //                 Bucket::Value(_, _, v) => return Some(v),
+        //                 Bucket::Empty => panic!("Bucket empty when it should not be!"),
+        //                 Bucket::Deleted => panic!("Bucket empty when it should not be!")
+        //             }
+        //         }
+        //     }
+
+        //     return None;
+
+        // } else {
+        //     return None;
+        // }
+
+        return None;
+
     }
 
     /// Returns true if key is in map.
@@ -283,7 +316,7 @@ impl<K, V> FastMap<K, V>
     /// ```
     pub fn clear(&mut self) {
         for i in 0..self.cache.len() {
-            self.cache[i].clear();
+            self.cache[i] = Bucket::Empty;
         }
 
         self.count = 0;
@@ -309,21 +342,21 @@ impl<K, V> FastMap<K, V>
 
     //**** Iterators *****
 
-    pub fn iter<'a>(&self) -> Iter<K, V> {
-        Iter::new(&self.cache)
-    }
+    // pub fn iter<'a>(&self) -> Iter<K, V> {
+    //     Iter::new(&self.cache)
+    // }
 
-    pub fn keys(&mut self) -> Keys<K, V> {
-        Keys { inner: self.iter() }
-    }
+    // pub fn keys(&mut self) -> Keys<K, V> {
+    //     Keys { inner: self.iter() }
+    // }
 
-    pub fn values(&mut self) -> Values<K, V> {
-        Values { inner: self.iter() }
-    }
+    // pub fn values(&mut self) -> Values<K, V> {
+    //     Values { inner: self.iter() }
+    // }
 
-    pub fn iter_mut<'a>(&mut self) -> IterMut<K, V> {
-        IterMut::new(&mut self.cache)
-    }
+    // pub fn iter_mut<'a>(&mut self) -> IterMut<K, V> {
+    //     IterMut::new(&mut self.cache)
+    // }
 
 
     //**** Internal hash stuff *****
@@ -365,31 +398,51 @@ impl<K, V> FastMap<K, V>
         let new_lim = self.lim();
         self.mod_mask = (new_lim as u64) - 1;
 
-        let mut vec: Vec<Vec<Bucket<K, V>>> = Vec::new();
+        self.rebuild_cache();
+    }
+
+
+    fn rebuild_cache(&mut self) {
+        let old_count = self.count;
+        self.count = 0;
+
+        let mut vec: Vec<Bucket<K, V>> = Vec::new();
 
         vec.append(&mut self.cache);
 
-        for _ in 0..new_lim {
-            self.cache.push(Vec::with_capacity(0));
+        for _ in 0..self.lim() + 10 {
+            self.cache.push(Bucket::Empty);
         }
 
-        while vec.len() > 0 {
-            let mut values = vec.pop().unwrap();
-            while values.len() > 0 {
-                if let Some(kv) = values.pop() {
-                    if let Bucket::Value(h, k, v) = kv {
-                        let ix = self.ix(h);
+        while let Some(item) = vec.pop() {
 
-                        let ref mut vals = self.cache[ix];
-                        vals.push(Bucket::Value(h, k, v));
-                    }
+            match item {
+                Bucket::Value(h, k, v) => {
+                    self.insert_internal(k, v);
+                    // let ix = self.ix(h);
+                    // self.cache[ix] = Bucket::Value(h, k, v);
                 }
+                _ => (),
             }
         }
 
-        debug_assert!(self.cache.len() == self.lim(), "cache vector the wrong length, lim: {:?} cache: {:?}", self.lim(), self.cache.len());
-    }
+        // while vec.len() > 0 {
+        //     let mut values = vec.pop().unwrap();
+        //     while values.len() > 0 {
+        //         if let Some(kv) = values.pop() {
+        //             if let Bucket::Value(h, k, v) = kv {
+        //                 let ix = self.ix(h);
 
+        //                 let ref mut vals = self.cache[ix];
+        //                 vals.push(Bucket::Value(h, k, v));
+        //             }
+        //         }
+        //     }
+        // }
+
+        // debug_assert!(self.cache.len() == self.lim(), "cache vector the wrong length, lim: {:?} cache: {:?}", self.lim(), self.cache.len());
+        debug_assert_eq!(old_count, self.count, "Different count after increase cache! Old: {}, New: {}", old_count, self.count);
+    }
 
     fn ensure_load_rate(&mut self) {
         // let _guard2 = flame::start_guard("ensure_load_rate");
@@ -411,11 +464,11 @@ impl<K, V> FastMap<K, V>
     pub fn load(&self) -> u64 {
         let mut count = 0;
 
-        for i in 0..self.cache.len() {
-            if self.cache[i].len() > 0 {
-                count += 1;
-            }
-        }
+        // for i in 0..self.cache.len() {
+        //     if self.cache[i].len() > 0 {
+        //         count += 1;
+        //     }
+        // }
 
         count
     }
@@ -437,9 +490,10 @@ impl<K, V> FastMap<K, V>
     pub fn assert_count(&self) -> bool {
         let mut count = 0;
 
-        for i in 0..self.cache.len() {
-            for _ in self.cache[i].iter() {
-                count += 1;
+        for item in self.cache.iter() {
+            match *item {
+                Bucket::Value(_, _, _) => count += 1,
+                _ => ()
             }
         }
 
@@ -450,17 +504,17 @@ impl<K, V> FastMap<K, V>
     pub fn collisions(&self) -> FastMap<u64, u64> {
         let mut map = FastMap::new();
 
-        for s in self.cache.iter() {
-            let key = s.len() as u64;
-            if key > 0 {
-                if !map.contains_key(key) {
-                    map.insert(key, 1);
-                } else {
-                    let counter = map.get_mut(key).unwrap();
-                    *counter += 1;
-                }
-            }
-        }
+        // for s in self.cache.iter() {
+        //     let key = s.len() as u64;
+        //     if key > 0 {
+        //         if !map.contains_key(key) {
+        //             map.insert(key, 1);
+        //         } else {
+        //             let counter = map.get_mut(key).unwrap();
+        //             *counter += 1;
+        //         }
+        //     }
+        // }
 
         // map.sort();
 
@@ -477,141 +531,141 @@ impl<K, V> FastMap<K, V>
     // }
 
 
-use std::slice::Iter as SliceIter;
-use std::slice::IterMut as SliceIterMut;
+// use std::slice::Iter as SliceIter;
+// use std::slice::IterMut as SliceIterMut;
 
-// ***************** Iter *********************
+// // ***************** Iter *********************
 
-pub struct Iter<'a, K: 'a, V: 'a>
-    where K: Eq + Hash {
-    outer: SliceIter<'a, Vec<Bucket<K, V>>>,
-    inner: SliceIter<'a, Bucket<K, V>>,
-}
+// pub struct Iter<'a, K: 'a, V: 'a>
+//     where K: Eq + Hash {
+//     outer: SliceIter<'a, Vec<Bucket<K, V>>>,
+//     inner: SliceIter<'a, Bucket<K, V>>,
+// }
 
-impl<'a, K, V> Iter<'a, K, V>
-    where K: Eq + Hash{
-    fn new(vec: &'a Vec<Vec<Bucket<K, V>>>) -> Self {
-        let mut outer = vec.iter();
-        let inner = outer.next()
-                         .map(|v| v.iter())
-                         .unwrap_or_else(|| (&[]).iter());
+// impl<'a, K, V> Iter<'a, K, V>
+//     where K: Eq + Hash{
+//     fn new(vec: &'a Vec<Vec<Bucket<K, V>>>) -> Self {
+//         let mut outer = vec.iter();
+//         let inner = outer.next()
+//                          .map(|v| v.iter())
+//                          .unwrap_or_else(|| (&[]).iter());
 
-        Iter {
-            outer: outer,
-            inner: inner,
-         }
-    }
-}
+//         Iter {
+//             outer: outer,
+//             inner: inner,
+//          }
+//     }
+// }
 
-impl<'a, K, V> Iterator for Iter<'a, K, V>
-    where K: Eq + Hash{
-    type Item = (&'a K, &'a V);
+// impl<'a, K, V> Iterator for Iter<'a, K, V>
+//     where K: Eq + Hash{
+//     type Item = (&'a K, &'a V);
 
-    #[inline]
-    fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        loop {
-            match self.inner.next() {
-                Some(r) => {
-                    match *r {
-                        Bucket::Value(_, ref k, ref v) => return Some((&k, &v)),
-                        Bucket::Empty => (),
-                        Bucket::Deleted => {}
-                    }
+//     #[inline]
+//     fn next(&mut self) -> Option<(&'a K, &'a V)> {
+//         loop {
+//             match self.inner.next() {
+//                 Some(r) => {
+//                     match *r {
+//                         Bucket::Value(_, ref k, ref v) => return Some((&k, &v)),
+//                         Bucket::Empty => (),
+//                         Bucket::Deleted => {}
+//                     }
 
-                },
-                None => (),
-            }
+//                 },
+//                 None => (),
+//             }
 
-            match self.outer.next() {
-                Some(v) => self.inner = v.iter(),
-                None => return None,
-            }
-        }
-    }
-}
+//             match self.outer.next() {
+//                 Some(v) => self.inner = v.iter(),
+//                 None => return None,
+//             }
+//         }
+//     }
+// }
 
 
 // ***************** Iter Mut *********************
 
-pub struct IterMut<'a, K: 'a, V: 'a>
-    where K: Eq + Hash {
-    outer: SliceIterMut<'a, Vec<Bucket<K, V>>>,
-    inner: SliceIterMut<'a, Bucket<K, V>>,
-}
+// pub struct IterMut<'a, K: 'a, V: 'a>
+//     where K: Eq + Hash {
+//     outer: SliceIterMut<'a, Vec<Bucket<K, V>>>,
+//     inner: SliceIterMut<'a, Bucket<K, V>>,
+// }
 
-impl<'a, K, V> IterMut<'a, K, V>
-    where K: Eq + Hash{
-    fn new(vec: &'a mut Vec<Vec<Bucket<K, V>>>) -> IterMut<'a, K, V> {
-        let mut outer = vec.iter_mut();
-        let inner = outer.next()
-                         .map(|v| v.iter_mut())
-                         .unwrap_or_else(|| (&mut []).iter_mut() );
+// impl<'a, K, V> IterMut<'a, K, V>
+//     where K: Eq + Hash{
+//     fn new(vec: &'a mut Vec<Vec<Bucket<K, V>>>) -> IterMut<'a, K, V> {
+//         let mut outer = vec.iter_mut();
+//         let inner = outer.next()
+//                          .map(|v| v.iter_mut())
+//                          .unwrap_or_else(|| (&mut []).iter_mut() );
 
-        IterMut {
-            outer: outer,
-            inner: inner,
-        }
-    }
-}
+//         IterMut {
+//             outer: outer,
+//             inner: inner,
+//         }
+//     }
+// }
 
 
-impl<'a, K, V> Iterator for IterMut<'a, K, V>
-    where K: Eq + Hash{
-    type Item = (&'a K, &'a mut V);
+// impl<'a, K, V> Iterator for IterMut<'a, K, V>
+//     where K: Eq + Hash{
+//     type Item = (&'a K, &'a mut V);
 
-    #[inline]
-    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
-        loop {
-            match self.inner.next() {
-                Some(r) => {
-                    match *r {
-                        Bucket::Value(_, ref k, ref mut v) => return Some((&k, &mut *v)),
-                        Bucket::Empty => (),
-                        Bucket::Deleted => {}
-                    }
-                }
-                None => (),
-            }
+//     #[inline]
+//     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
+//         loop {
+//             match self.inner.next() {
+//                 Some(r) => {
+//                     match *r {
+//                         Bucket::Value(_, ref k, ref mut v) => return Some((&k, &mut *v)),
+//                         Bucket::Empty => (),
+//                         Bucket::Deleted => {}
+//                     }
+//                 }
+//                 None => (),
+//             }
 
-            match self.outer.next() {
-                Some(v) => self.inner = v.iter_mut(),
-                None => return None,
-            }
-        }
-    }
-}
+//             match self.outer.next() {
+//                 Some(v) => self.inner = v.iter_mut(),
+//                 None => return None,
+//             }
+//         }
+//     }
+// }
 
 
 // ***************** Values Iter *********************
 
-pub struct Values<'a, K:'a, V: 'a>
-    where K: Eq + Hash{
-    inner: Iter<'a, K, V>
-}
+// pub struct Values<'a, K:'a, V: 'a>
+//     where K: Eq + Hash{
+//     inner: Iter<'a, K, V>
+// }
 
 
-impl<'a, K, V> Iterator for Values<'a, K, V>
-     where K: Eq + Hash{
-    type Item = &'a V;
+// impl<'a, K, V> Iterator for Values<'a, K, V>
+//      where K: Eq + Hash{
+//     type Item = &'a V;
 
-    #[inline] fn next(&mut self) -> Option<(&'a V)> { self.inner.next().map(|kv| kv.1) }
-    #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
-}
+//     #[inline] fn next(&mut self) -> Option<(&'a V)> { self.inner.next().map(|kv| kv.1) }
+//     #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+// }
 
 // ***************** Keys Iter *********************
 
-pub struct Keys<'a, K: 'a, V: 'a>
-    where K: Eq + Hash {
-    inner: Iter<'a, K, V>
-}
+// pub struct Keys<'a, K: 'a, V: 'a>
+//     where K: Eq + Hash {
+//     inner: Iter<'a, K, V>
+// }
 
-impl<'a, K, V> Iterator for Keys<'a, K, V>
-    where K: Eq + Hash{
-    type Item = &'a K;
+// impl<'a, K, V> Iterator for Keys<'a, K, V>
+//     where K: Eq + Hash{
+//     type Item = &'a K;
 
-    #[inline] fn next(&mut self) -> Option<&'a K> { self.inner.next().map(|kv| kv.0) }
-    #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
-}
+//     #[inline] fn next(&mut self) -> Option<&'a K> { self.inner.next().map(|kv| kv.0) }
+//     #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+// }
 
 // // ***************** Values Mut *********************
 
