@@ -17,9 +17,9 @@ pub struct FastMap<K, V, S = Murmur2_64a>
     hasher: S,
 }
 
-enum Bucket<K, V>
-    where K: Eq + Hash {
+enum Bucket<K: Eq + Hash, V> {
     Value(u64, K, V),
+    Deleted,
     Empty,
 }
 
@@ -94,6 +94,7 @@ impl<K, V> FastMap<K, V>
                         }
                     }
                     Bucket::Empty => {}
+                    Bucket::Deleted => {}
                 }
             }
 
@@ -138,6 +139,7 @@ impl<K, V> FastMap<K, V>
                         }
                     }
                     Bucket::Empty => {}
+                    Bucket::Deleted => {}
                 }
             }
 
@@ -181,6 +183,7 @@ impl<K, V> FastMap<K, V>
                         }
                     }
                     Bucket::Empty => {}
+                    Bucket::Deleted => {}
                 }
             }
 
@@ -225,7 +228,7 @@ impl<K, V> FastMap<K, V>
                                 key_match = false;
                             }
                         }
-                        Bucket::Empty => {key_match = false;}
+                        _ => key_match = false
                     }
                 }
 
@@ -235,6 +238,7 @@ impl<K, V> FastMap<K, V>
                     match kv {
                         Bucket::Value(_, _, v) => return Some(v),
                         Bucket::Empty => panic!("Bucket empty when it should not be!"),
+                        Bucket::Deleted => panic!("Bucket empty when it should not be!")
                     }
                 }
             }
@@ -339,8 +343,13 @@ impl<K, V> FastMap<K, V>
         let hash = hasher.finish();
 
         // Faster modulus
-        let ix = (hash & self.mod_mask) as usize;
+        let ix = self.ix(hash);
         (hash, ix)
+    }
+
+    #[inline]
+    fn ix(&self, hash: u64) -> usize {
+        (hash & self.mod_mask) as usize
     }
 
 
@@ -369,10 +378,10 @@ impl<K, V> FastMap<K, V>
             while values.len() > 0 {
                 if let Some(kv) = values.pop() {
                     if let Bucket::Value(h, k, v) = kv {
-                        let (hash, ix) = self.calc_index(&k);
+                        let ix = self.ix(h);
 
                         let ref mut vals = self.cache[ix];
-                        vals.push(Bucket::Value(hash, k, v));
+                        vals.push(Bucket::Value(h, k, v));
                     }
                 }
             }
@@ -457,11 +466,6 @@ impl<K, V> FastMap<K, V>
 
         map
     }
-
-    pub fn write_flame(&self) {
-        use std::fs::File;
-        // flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
-    }
 }
 
 
@@ -511,6 +515,7 @@ impl<'a, K, V> Iterator for Iter<'a, K, V>
                     match *r {
                         Bucket::Value(_, ref k, ref v) => return Some((&k, &v)),
                         Bucket::Empty => (),
+                        Bucket::Deleted => {}
                     }
 
                 },
@@ -562,6 +567,7 @@ impl<'a, K, V> Iterator for IterMut<'a, K, V>
                     match *r {
                         Bucket::Value(_, ref k, ref mut v) => return Some((&k, &mut *v)),
                         Bucket::Empty => (),
+                        Bucket::Deleted => {}
                     }
                 }
                 None => (),
